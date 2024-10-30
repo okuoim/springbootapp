@@ -1,0 +1,98 @@
+node {
+    def application = "springbootapp"
+    def dockerhubaccountid = "okuoim"
+    def kubernetesNamespace = "orbit-bank-apps" // Updated namespace
+    def imageTag = "${dockerhubaccountid}/${application}:${BUILD_NUMBER}"
+
+    stage('Clone repository') {
+        checkout scm
+    }
+
+    stage('Build image') {
+        app = docker.build(imageTag)
+    }
+
+    stage('Push image') {
+        withDockerRegistry([ credentialsId: "dockerHub", url: "" ]) {
+            app.push()
+            app.push("latest")
+        }
+    }
+
+    stage('Deploy to Kubernetes') {
+        try {
+            // Set the Kubernetes context
+            sh("kubectl config set-context --current --namespace=${kubernetesNamespace}")
+
+            // Create or update deployment
+            sh("""
+                kubectl apply -f - <<EOF
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: ${application}
+                  labels:
+                    app: ${application}
+                spec:
+                  replicas: 1
+                  selector:
+                    matchLabels:
+                      app: ${application}
+                  template:
+                    metadata:
+                      labels:
+                        app: ${application}
+                    spec:
+                      containers:
+                      - name: ${application}
+                        image: ${imageTag}
+                        ports:
+                        - containerPort: 8080
+                        volumeMounts:
+                        - mountPath: /var/log/
+                          name: log-volume
+                        resources:
+                          requests:
+                            memory: "512Mi"
+                            cpu: "500m"
+                          limits:
+                            memory: "1Gi"
+                            cpu: "1"
+                      volumes:
+                      - name: log-volume
+                        hostPath:
+                          path: /var/log/
+                EOF
+            """)
+
+            // Create or update service
+            sh("""
+                kubectl apply -f - <<EOF
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: ${application}
+                spec:
+                  selector:
+                    app: ${application}
+                  ports:
+                    - protocol: TCP
+                      port: 82
+                      targetPort: 8080
+                      nodePort: 30000 // Specify a nodePort if needed, or omit for automatic assignment
+                  type: NodePort
+                EOF
+            """)
+        } catch (Exception e) {
+            echo "Deployment failed: ${e.message}"
+            error("Aborting due to deployment failure.")
+        }
+    }
+
+    stage('Remove old images') {
+        // Remove dangling images
+        sh("docker image prune -f")
+        // Remove specific old image
+        sh("docker rmi ${dockerhubaccountid}/${application}:latest -f || true")
+    }
+}
