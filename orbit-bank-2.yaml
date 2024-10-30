@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: springbootapp
+  namespace: orbit-bank-apps  # Specify the namespace here
+  labels:
+    app: springbootapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: springbootapp
+  template:
+    metadata:
+      labels:
+        app: springbootapp
+    spec:
+      containers:
+      - name: springbootapp
+        image: okuoim/springbootapp:latest
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - mountPath: /var/log/
+          name: log-volume
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+      volumes:
+      - name: log-volume
+        hostPath:
+          path: /var/log/
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: springbootapp
+  namespace: orbit-bank-apps  # Specify the namespace here
+spec:
+  selector:
+    app: springbootapp
+  ports:
+    - protocol: TCP
+      port: 82
+      targetPort: 8080
+      nodePort: 30000
+  type: NodePort
+
